@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Node
+node_modules/
+
+# Build artifacts from deck directories
+build/
+
+# OS
+.DS_Store

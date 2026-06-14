@@ -1,0 +1,6 @@
+# The package.json "files" whitelist already controls what's published;
+# this is a belt-and-suspenders exclude for stray local artifacts.
+__pycache__/
+*.py[cod]
+**/build/
+.DS_Store

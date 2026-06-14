@@ -1,0 +1,30 @@
+{
+  "name": "memory-toast-make-card",
+  "version": "0.1.0",
+  "description": "Claude Code skill to build Memory Toast flashcard decks (卡包) — with optional AI image generation using your own OpenAI/Gemini key — and upload them to your Memory Toast account.",
+  "bin": {
+    "memory-toast-make-card": "bin/install.js"
+  },
+  "files": [
+    "SKILL.md",
+    "README.md",
+    "scripts/*.py",
+    "references/*.md",
+    "bin/*.js"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "claude-skill",
+    "agent-skill",
+    "flashcards",
+    "spaced-repetition",
+    "memory-toast",
+    "anki",
+    "study"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=16"
+  }
+}
