@@ -1,5 +1,8 @@
 # memory-toast-make-card
 
+[![npm](https://img.shields.io/npm/v/memory-toast-make-card)](https://www.npmjs.com/package/memory-toast-make-card)
+[![license: MIT](https://img.shields.io/npm/l/memory-toast-make-card)](LICENSE)
+
 A [Claude Code](https://claude.com/claude-code) skill that turns your study material —
 requirements, web research, PDFs, images, notes — into [Memory Toast](https://memory-toast-api.smallseven-87b.workers.dev)
 flashcard decks (卡包), optionally **generates card images with your own OpenAI/Gemini key**,
