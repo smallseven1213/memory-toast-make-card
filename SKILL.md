@@ -37,6 +37,21 @@ Ask (in the user's language) only what is missing, one item at a time:
 - Whether cards should have **generated images** — and if so, the visual style
   (e.g. flat vector icon, watercolor, photoreal) and which provider (OpenAI / Gemini).
 
+**Deck storage location (do this first — never build decks in /tmp):**
+
+```bash
+python3 scripts/mt_config.py get deck-root      # prints the saved root, or empty
+```
+
+If empty, ask the user where to keep their decks, then save it (remembered across sessions in
+`~/.memory-toast/config.json`):
+
+```bash
+python3 scripts/mt_config.py set deck-root ~/Documents/MemoryToast/decks
+```
+
+Build each deck at `<deck-root>/<slug>/` — `mt_config.py path <slug>` prints the full path.
+
 ### 2. Collect data
 
 - **User files:** read PDFs/images directly and transcribe (a dedicated `pdf` skill is
@@ -80,9 +95,18 @@ self-explanatory play button. Use a caption only when it carries real informatio
 
 ### 5. Build the deck directory + validate (no network)
 
-Create a working directory (e.g. `/tmp/make-card/<slug>/` or a user-specified path) with
-`deck.json` (schema in pack-format.md §3) and any `assets/`. Do NOT hand-write UUIDs,
-positions, `storageRef`, or `mimeType` — the script generates them. Then:
+Create the deck directory at `<deck-root>/<slug>/` (the root from step 1 — **never /tmp**,
+which is wiped on reboot and loses the editable source + AI record). Put `deck.json` (schema
+in pack-format.md §3) and any `assets/` there. Do NOT hand-write UUIDs, positions,
+`storageRef`, or `mimeType` — the script generates them. On upload the script also writes
+`.memory-toast.json` (the AI record) into this directory.
+
+Rich text is supported: `frontContent` / `backContent` / `caption` may use an HTML subset
+for font size, bold/italic/underline, color, and paragraph alignment. The script emits the
+matching `*Html` keys automatically and falls back to plain text for old-style content. See
+the whitelist + examples in pack-format.md §3.1 — stay inside it or tags are stripped.
+
+Then:
 
 ```bash
 python3 scripts/upload_pack.py <deck-dir> --dry-run
@@ -93,20 +117,45 @@ Fix any validation errors. The built ZIP lands at `<deck-dir>/build/pack.zip`.
 ### 6. Upload
 
 ```bash
-# New deck (creates the deck, uploads pack version 1)
+# New deck (creates it, uploads pack v1, writes .memory-toast.json)
 python3 scripts/upload_pack.py <deck-dir>
 
-# Update an existing deck — needs the current server version
+# Update the SAME deck later — just run it again. upload_pack.py reads
+# .memory-toast.json and auto-updates (deckId + version); no flags needed.
+python3 scripts/upload_pack.py <deck-dir>
+
+# Override target/version explicitly if needed (--new forces a brand-new deck):
 python3 scripts/upload_pack.py <deck-dir> --deck-id <id> --local-version <serverVersion>
 ```
 
-On a 409 conflict the script prints the server version and the exact retry command.
+Every successful upload (re)writes the deck's `.memory-toast.json` — the **AI record** a
+future session reads to update or publish the deck. On a 409 conflict the script prints the
+server version and the exact retry command.
 **Before updating an existing deck, warn the user:** the upload replaces the server pack
 wholesale; un-synced edits on the phone are overwritten on the next pull (pack-format.md §5).
 
 If the script says the session expired, run `python3 scripts/mt_login.py` again.
 
-### 7. Report
+### 7. Publish to the Library (optional)
+
+Decks are private until published. To share a deck publicly, use `scripts/library_pack.py`
+(reads `deckId` from `.memory-toast.json`):
+
+```bash
+# Publish once (category: language|science|history|programming|math|geography|exam|other)
+python3 scripts/library_pack.py publish <deck-dir> \
+  --category language --description "..." --learning-language es
+
+# After updating the deck (upload_pack.py first), push a new public version:
+python3 scripts/library_pack.py release <deck-dir> --changelog "Added digraphs"
+
+python3 scripts/library_pack.py status          # list your published packs
+```
+
+`publish` records the `libraryPackId` back into `.memory-toast.json`, so `release` later needs
+no ids. Confirm with the user before publishing — it makes the deck publicly downloadable.
+
+### 8. Report
 
 Tell the user: deck title, card count, media count, ZIP size, deck id, pack version, and
 remind them to pull the deck in the app (open the deck → top banner "new version available" →

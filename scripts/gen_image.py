@@ -74,6 +74,13 @@ def _http_post(url: str, payload: dict, headers: dict, timeout: int = 180):
             return e.code, {"raw": text}
 
 
+def _http_get_bytes(url: str, timeout: int = 120) -> bytes:
+    """Download raw bytes (used for DALL·E URL responses)."""
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
 def _size_to_aspect(size: str):
     """Map a WxH size to the closest Imagen aspectRatio bucket (or None)."""
     if not size or "x" not in size.lower():
@@ -88,15 +95,19 @@ def _size_to_aspect(size: str):
 
 
 def gen_openai(key: str, model: str, prompt: str, size: str) -> bytes:
+    # No response_format param: gpt-image-1 returns base64 (and rejects the param),
+    # while DALL·E returns a URL — handle whichever comes back.
     payload = {"model": model, "prompt": prompt, "n": 1, "size": size}
     status, res = _http_post("https://api.openai.com/v1/images/generations",
                              payload, {"Authorization": f"Bearer {key}"})
     if status != 200:
         fail(f"OpenAI image API error ({status}): {(res.get('error') or {}).get('message') or res}")
     data = res.get("data") or []
-    if not data or not data[0].get("b64_json"):
-        fail(f"OpenAI returned no image data: {res}")
-    return base64.b64decode(data[0]["b64_json"])
+    if data and data[0].get("b64_json"):
+        return base64.b64decode(data[0]["b64_json"])
+    if data and data[0].get("url"):
+        return _http_get_bytes(data[0]["url"])
+    fail(f"OpenAI returned no image data: {res}")
 
 
 def gen_gemini_imagen(key: str, model: str, prompt: str, size: str) -> bytes:

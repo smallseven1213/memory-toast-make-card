@@ -65,6 +65,9 @@ You can also drive the scripts directly:
 ```bash
 S=~/.claude/skills/memory-toast-make-card/scripts
 
+# One-time: choose where decks are kept (remembered; keeps them out of /tmp)
+python3 $S/mt_config.py set deck-root ~/Documents/MemoryToast/decks
+
 # Generate an image with your own key
 python3 $S/gen_image.py --provider openai \
   --prompt "flat vector icon of a person eating, warm palette, white background" \
@@ -73,15 +76,56 @@ python3 $S/gen_image.py --provider openai \
 # Validate a deck directory offline (builds my-deck/build/pack.zip)
 python3 $S/upload_pack.py my-deck --dry-run
 
-# Create a new deck and upload
+# Create a new deck and upload (writes my-deck/.memory-toast.json)
 python3 $S/upload_pack.py my-deck
 
-# Update an existing deck (needs its current server version)
-python3 $S/upload_pack.py my-deck --deck-id <id> --local-version <serverVersion>
+# Update the SAME deck later — just run it again; it auto-reads the record
+python3 $S/upload_pack.py my-deck
+
+# Publish to the public Library, then release new versions later
+python3 $S/library_pack.py publish my-deck --category language --description "..."
+python3 $S/library_pack.py release my-deck --changelog "Added 10 cards"
 ```
 
 See [`references/pack-format.md`](references/pack-format.md) for the `deck.json` schema, the
 upload protocol, limits, and version/conflict rules.
+
+### Deck storage, updates & publishing
+
+- Decks are built under a **remembered root** (`mt_config.py set deck-root <path>`), not /tmp,
+  so the editable source survives reboots. Each deck folder gets a `.memory-toast.json` record
+  (deckId, version, structure, …) on upload — the state a later session reads to continue.
+- To **update** a deck, edit it and re-run `upload_pack.py <deck-dir>`; it reads that record and
+  bumps the server version automatically — no ids to remember (`--new` forces a fresh deck).
+- To **share** a deck, `library_pack.py publish` it to the public Library (categories: language,
+  science, history, programming, math, geography, exam, other), then `release` new versions as
+  you update it. `status` lists what you've published.
+
+## Rich text in cards
+
+A card's `frontContent` / `backContent` (and a section's `caption`) may contain a small **HTML
+subset** for formatting; plain text is always valid, so existing decks keep working unchanged.
+`make-card` emits this HTML straight from `deck.json` — what you write is what the app renders.
+
+Allowed tags:
+
+- `<b>` / `<strong>` — bold
+- `<i>` / `<em>` — italic
+- `<u>` — underline
+- `<br>` — line break
+- `<span style="font-size:sm|base|lg|xl;color:<token>">` — inline size and/or color
+- `<p style="text-align:left|center|right">…</p>` — paragraph alignment
+
+Font sizes are four semantic levels — `sm`, `base`, `lg`, `xl` (not arbitrary px). Color tokens
+are: `primary`, `red`, `orange`, `green`, `blue`, `purple`, `gray`.
+
+```json
+{ "frontContent": "<b>紅蘋果</b>", "backContent": "apple <span style=\"font-size:lg;color:red\">(fruit)</span>" }
+```
+
+Anything outside the whitelist (other tags, attributes, styles, or color values) is dropped
+while its text is kept — no scripts ever run. See
+[`references/pack-format.md`](references/pack-format.md) §3.1 for the full rules.
 
 ## Configuration
 
