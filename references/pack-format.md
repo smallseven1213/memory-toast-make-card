@@ -126,6 +126,108 @@ my-deck/
 - Generated images (from `gen_image.py`) are just local image sections — save them under the
   deck directory and reference them via `file`.
 
+### 3.1 Rich text — the HTML subset
+
+`frontContent` / `backContent` and a section's `caption` may be **HTML-subset** strings that
+carry **font size, bold / italic / underline, color, and paragraph alignment**. The mobile app
+parses them with the same whitelist; anything outside it is dropped (tag removed, inner text
+kept), so as long as you stay inside the whitelist, what you emit is what the app renders.
+
+Whitelist (identical to `apps/mobile/.../rich_text/rich_html_parser.dart`):
+
+| Class | Allowed | Meaning |
+|-------|---------|---------|
+| inline | `<b>` `<strong>` | bold |
+| inline | `<i>` `<em>` | italic |
+| inline | `<u>` | underline |
+| inline | `<br>` | line break |
+| inline | `<span style="…">` | **only** `font-size:sm\|base\|lg\|xl` and/or `color:<token>` |
+| block  | `<p style="text-align:left\|center\|right">…</p>` | paragraph alignment |
+
+- `color` token must be one of: `primary` `red` `orange` `green` `blue` `purple` `gray`.
+- Any other tag (`<div>`, `<script>`, …), other attribute (`class`, `onclick`, …), or other
+  style prop/value (`font-weight`, `99px`, `hotpink`, …) is dropped while its text is kept.
+
+How the emitter derives `*Html` + plain text:
+
+- The rich source for a field is the explicit `frontContentHtml` / `backContentHtml` /
+  `captionHtml` key on the card/section if present; otherwise the `frontContent` /
+  `backContent` / `caption` value itself if it contains whitelist tags.
+- With a rich source: the output `*Html` = sanitized whitelist HTML, and the plain field =
+  the tag-stripped text (used for search + as a render fallback).
+- With no rich source: only the plain field is emitted; the `*Html` key is **omitted** so
+  old-style plain packs stay byte-clean.
+- The empty-card check (front/back + sections not all empty) runs against the **plain** text.
+
+Rich card in deck.json (the two forms are equivalent — use either):
+
+```json
+{
+  "frontContent": "<b>食べる</b><br><span style=\"font-size:lg;color:red\">godan verb</span>",
+  "backContent": "to eat (taberu)"
+}
+```
+
+```json
+{
+  "frontContent": "食べる",
+  "frontContentHtml": "<b>食べる</b><br><span style=\"font-size:lg;color:red\">godan verb</span>",
+  "backContent": "to eat (taberu)"
+}
+```
+
+Both produce, in `cards.json`:
+`frontContentHtml = "<b>食べる</b><br><span style=\"font-size:lg;color:red\">godan verb</span>"`
+and `frontContent = "食べる\ngodan verb"` (the plain projection).
+
+### 3.2 Ordered blocks — advanced layout
+
+Most cards only need `frontContent` + `frontSections[]`. To control the **exact vertical
+order** (e.g. "word → audio right under it → KK/POS → a tappable example → image"), a card
+side may instead use `frontBlocks` / `backBlocks`: an **ordered** array of blocks. The app
+renders blocks in order when present; cards without blocks render via `*Content` +
+`*Sections` exactly as before.
+
+Block types:
+
+| type | fields | notes |
+|------|--------|-------|
+| `text` | `content` / `contentHtml` (rich, §3.1 whitelist), `audios[]` (optional), `audioAlign` / `audioSize` (optional) | a text run; may carry a row of tap-to-play audio buttons below it |
+| `image` | `file` (local) or `url` (external), `caption` / `captionHtml` (optional) | image, same rules as a §3 image section |
+
+Each `audios[]` button: `{ "label": "US", "file": "assets/x.us.mp3" }` (or `url`); `label`
+may be rich (`labelHtml`). Each button is independently tap-to-play — no autoplay, no toggle;
+add more buttons for more accents.
+
+The audio row's layout is tunable per text block: `audioAlign` = `start` / `center` (default) /
+`end` (horizontal alignment of the button row), and `audioSize` = `sm` / `md` (default) / `lg`
+(button padding, icon and label size). Older app versions ignore these and use the defaults.
+
+deck.json example (back uses blocks; front stays a plain word):
+
+```json
+{
+  "frontContent": "<p style=\"text-align:center\"><b><span style=\"font-size:xl\">apple</span></b></p>",
+  "backBlocks": [
+    { "type": "text", "content": "<b><span style=\"font-size:xl\">apple</span></b>",
+      "audios": [ {"label":"US","file":"assets/apple.us.mp3"}, {"label":"UK","file":"assets/apple.uk.mp3"} ],
+      "audioAlign": "center", "audioSize": "md" },
+    { "type": "text", "content": "<span style=\"color:gray\">[ˈæpl̩]</span><br><b><span style=\"color:primary\">n.</span></b> apple" },
+    { "type": "text", "content": "<b>e.g.</b> I eat an <b>apple</b>.",
+      "audios": [ {"label":"US","file":"assets/apple.ex1.us.mp3"}, {"label":"UK","file":"assets/apple.ex1.uk.mp3"} ] },
+    { "type": "image", "file": "assets/apple.webp" }
+  ]
+}
+```
+
+**Backward compatibility (important):** when emitting blocks, `upload_pack.py` ALSO writes an
+equivalent legacy projection — `backContent` (text blocks joined) + `backSections` (image
+blocks and every audio turned into a section, caption = the button's label). So new app
+versions render the new layout from `*Blocks`, while old app versions ignore `*Blocks` and
+render the previous layout from `*Content` + `*Sections`. `schemaVersion` stays `1` (purely
+additive optional keys). Each block's media follows the same extension whitelist and gets
+generated UUID/position/storageRef/mimeType, just like §3 sections.
+
 ## 4. Upload protocol (API)
 
 `scripts/upload_pack.py` runs these steps (the same endpoints the mobile app's sync uses):
@@ -159,7 +261,7 @@ with the local one and offers the pull when the server is newer and no local edi
 
 | Item | Limit |
 |------|-------|
-| ZIP size | ≤ 100 MB |
+| ZIP size | ≤ 200 MB |
 | title | 1–200 characters |
 | description | ≤ 1000 characters |
 | tags | ≤ 10 |

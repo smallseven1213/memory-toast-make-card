@@ -41,7 +41,7 @@ from pathlib import Path
 
 from _mt_auth import api_call, fail, get_access_token, resolve_api_url
 
-MAX_ZIP_BYTES = 100 * 1024 * 1024  # server-side limit in validators/sync.ts
+MAX_ZIP_BYTES = 200 * 1024 * 1024  # server-side limit in validators/sync.ts
 DECK_RECORD = ".memory-toast.json"  # per-deck AI state file (deckId, version, libraryPackId, …)
 
 ALLOWED_EXTS = {
@@ -388,6 +388,139 @@ def normalize_section(sec: dict, deck_dir: Path, where: str, errors: list, media
     return out
 
 
+def normalize_audio_ref(a: dict, deck_dir: Path, where: str, errors: list, media: dict) -> dict:
+    """One tap-to-play audio button inside a text block -> cards.json audio ref.
+
+    Mirrors an audio section (storageKind/storageRef/mimeType/durationMs) plus a short
+    `label` (optionally rich via labelHtml). Local files get a generated media/{id}{ext}
+    storageRef registered in `media`.
+    """
+    aid = str(uuid.uuid4())
+    label = a.get("label")
+    label_html = None
+    lab_src = _rich_source(a, "label", "labelHtml")
+    if lab_src is not None:
+        label_html = _sanitize_rich_html(lab_src)
+        label = _strip_tags(lab_src) or None
+    has_file = bool(a.get("file"))
+    has_url = bool(a.get("url"))
+    if has_file == has_url:
+        errors.append(f"{where}: exactly one of 'file' or 'url' is required")
+        return {}
+    if has_url:
+        url = a["url"]
+        if not url.startswith(("http://", "https://")):
+            errors.append(f"{where}: url must be http(s), got {url!r}")
+            return {}
+        storage_kind, storage_ref, mime = "external", url, None
+    else:
+        rel = a["file"]
+        src = (deck_dir / rel).resolve()
+        if not src.is_file():
+            errors.append(f"{where}: file not found: {rel}")
+            return {}
+        ext = src.suffix.lower()
+        if ext not in ALLOWED_EXTS["audio"]:
+            errors.append(f"{where}: extension {ext!r} not allowed for audio")
+            return {}
+        storage_kind = "local"
+        storage_ref = f"media/{aid}{ext}"
+        mime = guess_mime(ext)
+        media[storage_ref] = src
+    out = {
+        "id": aid,
+        "label": label if label else None,
+        "storageKind": storage_kind,
+        "storageRef": storage_ref,
+        "mimeType": mime,
+        "durationMs": a.get("durationMs"),
+    }
+    if label_html is not None:
+        out["labelHtml"] = label_html
+    return out
+
+
+def normalize_blocks(blocks: list, deck_dir: Path, where: str, errors: list, media: dict):
+    """Process one side's ordered blocks (deck.json input) into cards.json blocks plus a
+    legacy projection (plain text, rich html, sections) so OLD app versions still render.
+
+    Returns (blocks_out, plain, html, sections).
+      - Block types: 'text' (content/contentHtml + optional audios[]) and 'image'.
+      - Legacy projection: text blocks -> joined content/html; image blocks + every audio
+        -> sections (audio caption = its label), in block order.
+    """
+    blocks_out, plains, htmls, sections = [], [], [], []
+    for j, blk in enumerate(blocks):
+        w = f"{where}[{j}]"
+        if not isinstance(blk, dict):
+            errors.append(f"{w}: block must be an object")
+            continue
+        btype = blk.get("type")
+        if btype == "text":
+            content = blk.get("content", "")
+            if not isinstance(content, str):
+                errors.append(f"{w}: text block 'content' must be a string")
+                content = ""
+            src = _rich_source(blk, "content", "contentHtml")
+            if src is not None:
+                bhtml = _sanitize_rich_html(src)
+                bplain = _strip_tags(src)
+            else:
+                bhtml = None
+                bplain = content
+            audios_out = []
+            for k, a in enumerate(blk.get("audios") or []):
+                na = normalize_audio_ref(a, deck_dir, f"{w}.audios[{k}]", errors, media)
+                if na:
+                    audios_out.append(na)
+            if not bplain and not audios_out:
+                errors.append(f"{w}: text block is empty (no content, no audios)")
+            bo = {"type": "text", "position": len(blocks_out), "content": bplain}
+            if bhtml is not None:
+                bo["contentHtml"] = bhtml
+            if audios_out:
+                bo["audios"] = audios_out
+            # Optional audio-row layout hints (blocks model only; the legacy
+            # projection has no equivalent). audioAlign: start|center|end,
+            # audioSize: sm|md|lg.
+            for hint in ("audioAlign", "audioSize"):
+                if blk.get(hint):
+                    bo[hint] = blk[hint]
+            blocks_out.append(bo)
+            if bplain:
+                plains.append(bplain)
+            htmls.append(bhtml if bhtml is not None else _esc(bplain))
+            for na in audios_out:
+                sec = {
+                    "id": na["id"], "kind": "audio", "position": len(sections),
+                    "storageKind": na["storageKind"], "storageRef": na["storageRef"],
+                    "caption": na.get("label"), "mimeType": na["mimeType"],
+                    "durationMs": na.get("durationMs"),
+                }
+                if na.get("labelHtml"):
+                    sec["captionHtml"] = na["labelHtml"]
+                sections.append(sec)
+        elif btype == "image":
+            sec = normalize_section(
+                {"kind": "image", "file": blk.get("file"), "url": blk.get("url"),
+                 "caption": blk.get("caption"), "captionHtml": blk.get("captionHtml")},
+                deck_dir, w, errors, media)
+            if sec:
+                bo = {"type": "image", "position": len(blocks_out),
+                      "storageKind": sec["storageKind"], "storageRef": sec["storageRef"],
+                      "mimeType": sec["mimeType"], "caption": sec.get("caption")}
+                if sec.get("captionHtml"):
+                    bo["captionHtml"] = sec["captionHtml"]
+                blocks_out.append(bo)
+                sec["position"] = len(sections)
+                sections.append(sec)
+        else:
+            errors.append(f"{w}: block 'type' must be 'text' or 'image', got {btype!r}")
+    plain = "\n".join(plains)
+    html = "<br><br>".join(h for h in htmls if h)
+    return blocks_out, plain, html, sections
+
+
 def build_pack(deck_dir: Path) -> dict:
     deck_json_path = deck_dir / "deck.json"
     if not deck_json_path.is_file():
@@ -415,31 +548,42 @@ def build_pack(deck_dir: Path) -> dict:
     cards_out = []
     for i, card in enumerate(cards_in):
         where = f"cards[{i}]"
-        front = card.get("frontContent", "")
-        back = card.get("backContent", "")
-        if not isinstance(front, str) or not isinstance(back, str):
-            errors.append(f"{where}: frontContent/backContent must be strings")
-            continue
-        # Resolve optional rich text. A field's rich source is an explicit
-        # *Html key, else the plain value if it itself has whitelist tags. When
-        # rich, *Html holds sanitized HTML and the plain field holds the
-        # tag-stripped projection (used for search + render fallback).
-        front_html = back_html = None
-        front_src = _rich_source(card, "frontContent", "frontContentHtml")
-        if front_src is not None:
-            front_html = _sanitize_rich_html(front_src)
-            front = _strip_tags(front_src)
-        back_src = _rich_source(card, "backContent", "backContentHtml")
-        if back_src is not None:
-            back_html = _sanitize_rich_html(back_src)
-            back = _strip_tags(back_src)
-        front_secs, back_secs = [], []
-        for side, key, out in (("front", "frontSections", front_secs), ("back", "backSections", back_secs)):
-            for j, sec in enumerate(card.get(key) or []):
-                norm = normalize_section(sec, deck_dir, f"{where}.{key}[{j}]", errors, media)
+        # Each side independently: use ordered `*Blocks` when present (new model),
+        # else the legacy `*Content` + `*Sections` path. Block sides also emit a
+        # legacy projection (plain/html/sections) so OLD app versions still render.
+        side_out = {}  # side -> (plain, html, sections, blocks_out_or_None)
+        for side, ckey, hkey, skey, bkey in (
+            ("front", "frontContent", "frontContentHtml", "frontSections", "frontBlocks"),
+            ("back", "backContent", "backContentHtml", "backSections", "backBlocks"),
+        ):
+            blocks_in = card.get(bkey)
+            if isinstance(blocks_in, list) and blocks_in:
+                b_out, plain, joined_html, secs = normalize_blocks(
+                    blocks_in, deck_dir, f"{where}.{bkey}", errors, media)
+                side_out[side] = (plain, joined_html or None, secs, b_out)
+                continue
+            content = card.get(ckey, "")
+            if not isinstance(content, str):
+                errors.append(f"{where}: {ckey} must be a string")
+                content = ""
+            # Rich source = explicit *Html key, else the plain value if it has
+            # whitelist tags. When rich, *Html holds sanitized HTML and the plain
+            # field holds the tag-stripped projection (search + render fallback).
+            chtml = None
+            src = _rich_source(card, ckey, hkey)
+            if src is not None:
+                chtml = _sanitize_rich_html(src)
+                content = _strip_tags(src)
+            secs = []
+            for j, sec in enumerate(card.get(skey) or []):
+                norm = normalize_section(sec, deck_dir, f"{where}.{skey}[{j}]", errors, media)
                 if norm:
-                    norm["position"] = len(out)
-                    out.append(norm)
+                    norm["position"] = len(secs)
+                    secs.append(norm)
+            side_out[side] = (content, chtml, secs, None)
+
+        front, front_html, front_secs, front_blocks = side_out["front"]
+        back, back_html, back_secs, back_blocks = side_out["back"]
         # Empty check runs against the PLAIN text (rich markup that strips to
         # nothing counts as empty).
         if not front and not front_secs:
@@ -458,6 +602,10 @@ def build_pack(deck_dir: Path) -> dict:
             card_out["frontContentHtml"] = front_html
         if back_html is not None:
             card_out["backContentHtml"] = back_html
+        if front_blocks is not None:
+            card_out["frontBlocks"] = front_blocks
+        if back_blocks is not None:
+            card_out["backBlocks"] = back_blocks
         cards_out.append(card_out)
 
     if errors:
@@ -485,7 +633,7 @@ def build_pack(deck_dir: Path) -> dict:
 
     data = zip_path.read_bytes()
     if len(data) > MAX_ZIP_BYTES:
-        fail(f"ZIP is {len(data)} bytes — exceeds the 100MB server limit")
+        fail(f"ZIP is {len(data)} bytes — exceeds the {MAX_ZIP_BYTES // (1024*1024)}MB server limit")
     return {
         "zip_path": zip_path,
         "size": len(data),
