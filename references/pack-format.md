@@ -261,7 +261,7 @@ with the local one and offers the pull when the server is newer and no local edi
 
 | Item | Limit |
 |------|-------|
-| ZIP size | ≤ 200 MB |
+| ZIP size | ≤ 300 MB |
 | title | 1–200 characters |
 | description | ≤ 1000 characters |
 | tags | ≤ 10 |

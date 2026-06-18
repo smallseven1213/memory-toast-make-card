@@ -41,7 +41,7 @@ from pathlib import Path
 
 from _mt_auth import api_call, fail, get_access_token, resolve_api_url
 
-MAX_ZIP_BYTES = 200 * 1024 * 1024  # server-side limit in validators/sync.ts
+MAX_ZIP_BYTES = 300 * 1024 * 1024  # server-side limit in validators/sync.ts
 DECK_RECORD = ".memory-toast.json"  # per-deck AI state file (deckId, version, libraryPackId, …)
 
 ALLOWED_EXTS = {
