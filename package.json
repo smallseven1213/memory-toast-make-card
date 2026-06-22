@@ -1,6 +1,6 @@
 {
   "name": "memory-toast-make-card",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Claude Code skill to build Memory Toast flashcard decks (卡包) — with optional AI image generation using your own OpenAI/Gemini key — and upload, update, or publish them to your Memory Toast account.",
   "bin": {
     "memory-toast-make-card": "bin/install.js"

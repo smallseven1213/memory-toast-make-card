@@ -242,6 +242,101 @@ def test_empty_check_uses_plain_text():
             raise AssertionError("expected validation failure for empty stripped front")
 
 
+# ---------------------------------------------------------------------------
+# Stable card ids across rebuilds — so updating a deck preserves the user's
+# study progress. The app keys study progress by card id and prunes orphans on
+# pull, so a re-upload that re-mints ids would wipe progress. Mirrors the Dart
+# content match in features/decks/data/services/progress_remap.dart.
+# ---------------------------------------------------------------------------
+
+def _build_in(deck_dir, cards):
+    """Build a pack inside a PERSISTENT dir, so a second build can reuse ids
+    from the first build's pack.zip. Returns the built cards.json list."""
+    deck = {"title": "T", "description": "", "tags": [], "cards": cards}
+    (deck_dir / "deck.json").write_text(json.dumps(deck))
+    info = up.build_pack(deck_dir)
+    import zipfile
+
+    with zipfile.ZipFile(info["zip_path"]) as zf:
+        return json.loads(zf.read("cards.json"))["cards"]
+
+
+def test_assign_stable_ids_reuses_unchanged_card_ids():
+    prior = [
+        {"id": "id-A", "frontContent": "apple", "backContent": "def-A"},
+        {"id": "id-B", "frontContent": "banana", "backContent": "def-B"},
+    ]
+    new = [
+        {"frontContent": "banana", "backContent": "def-B"},
+        {"frontContent": "apple", "backContent": "def-A"},
+    ]
+    up.assign_stable_ids(new, prior)
+    assert new[0]["id"] == "id-B"  # matched by content, order-independent
+    assert new[1]["id"] == "id-A"
+
+
+def test_assign_stable_ids_back_edit_keeps_id():
+    prior = [{"id": "id-A", "frontContent": "apple", "backContent": "one"}]
+    new = [{"frontContent": "apple", "backContent": "one; two"}]
+    up.assign_stable_ids(new, prior)
+    assert new[0]["id"] == "id-A"  # front-stable match survives a back edit
+
+
+def test_assign_stable_ids_new_card_gets_fresh_id():
+    prior = [{"id": "id-A", "frontContent": "apple", "backContent": "def-A"}]
+    new = [
+        {"frontContent": "apple", "backContent": "def-A"},
+        {"frontContent": "cherry", "backContent": "def-C"},
+    ]
+    up.assign_stable_ids(new, prior)
+    assert new[0]["id"] == "id-A"
+    assert new[1]["id"] and new[1]["id"] != "id-A"
+    assert len(new[1]["id"]) >= 32  # a real uuid, not a placeholder
+
+
+def test_assign_stable_ids_front_change_gets_fresh_id():
+    prior = [{"id": "id-A", "frontContent": "apple", "backContent": "same"}]
+    new = [{"frontContent": "orange", "backContent": "same"}]
+    up.assign_stable_ids(new, prior)
+    assert new[0]["id"] != "id-A"
+
+
+def test_assign_stable_ids_duplicate_front_disambiguated_by_back():
+    prior = [
+        {"id": "id-1", "frontContent": "dup", "backContent": "b1"},
+        {"id": "id-2", "frontContent": "dup", "backContent": "b2"},
+    ]
+    new = [
+        {"frontContent": "dup", "backContent": "b2"},
+        {"frontContent": "dup", "backContent": "b1"},
+    ]
+    up.assign_stable_ids(new, prior)
+    assert new[0]["id"] == "id-2"
+    assert new[1]["id"] == "id-1"
+
+
+def test_build_pack_keeps_card_ids_stable_across_rebuilds():
+    with tempfile.TemporaryDirectory() as d:
+        deck_dir = Path(d)
+        v1 = _build_in(deck_dir, [
+            {"frontContent": "apple", "backContent": "a fruit"},
+            {"frontContent": "banana", "backContent": "yellow"},
+        ])
+        ids_v1 = {c["frontContent"]: c["id"] for c in v1}
+
+        # Rebuild: edit banana's back, append cherry; apple untouched.
+        v2 = _build_in(deck_dir, [
+            {"frontContent": "apple", "backContent": "a fruit"},
+            {"frontContent": "banana", "backContent": "yellow; a fruit"},
+            {"frontContent": "cherry", "backContent": "red"},
+        ])
+        ids_v2 = {c["frontContent"]: c["id"] for c in v2}
+
+        assert ids_v2["apple"] == ids_v1["apple"], "unchanged card kept its id"
+        assert ids_v2["banana"] == ids_v1["banana"], "back-edit kept the id"
+        assert ids_v2["cherry"] not in ids_v1.values(), "new card got a fresh id"
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

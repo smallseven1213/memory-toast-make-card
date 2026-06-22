@@ -521,6 +521,68 @@ def normalize_blocks(blocks: list, deck_dir: Path, where: str, errors: list, med
     return blocks_out, plain, html, sections
 
 
+def _read_prior_cards(deck_dir):
+    """Cards from the previous local build (deck_dir/build/pack.zip), used to
+    reuse card ids on rebuild. Empty when there's no prior pack or it can't be
+    read — the app's pull-time content match is the backstop in that case."""
+    zip_path = Path(deck_dir) / "build" / "pack.zip"
+    if not zip_path.exists():
+        return []
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            data = json.loads(zf.read("cards.json").decode("utf-8"))
+    except Exception:
+        return []
+    return [
+        {
+            "id": c.get("id"),
+            "frontContent": c.get("frontContent", ""),
+            "backContent": c.get("backContent", ""),
+        }
+        for c in data.get("cards", [])
+    ]
+
+
+def assign_stable_ids(new_cards, prior_cards):
+    """Assign each new card an id, reusing the prior build's id when the card is
+    'the same', so a re-upload preserves study progress (the app keys progress
+    by card id). Tiered, consuming match against the prior build:
+      1. exact (frontContent, backContent)
+      2. frontContent alone (survives back-side edits, e.g. adding an example)
+    A card is reused only when its key is UNIQUE on both sides; ambiguous or
+    unmatched new cards get a fresh uuid4. Mirrors computeProgressRemap() in the
+    Flutter app. Mutates `new_cards` in place; returns it."""
+    matched = {}  # new index -> reused prior id
+    rem_old = list(range(len(prior_cards)))
+    rem_new = list(range(len(new_cards)))
+
+    def run_pass(key_of):
+        old_keys, new_keys = {}, {}
+        for oi in rem_old:
+            old_keys.setdefault(key_of(prior_cards[oi]), []).append(oi)
+        for ni in rem_new:
+            new_keys.setdefault(key_of(new_cards[ni]), []).append(ni)
+        used_old, used_new = set(), set()
+        for ni in rem_new:
+            key = key_of(new_cards[ni])
+            olds, news = old_keys.get(key, []), new_keys.get(key, [])
+            if len(olds) == 1 and len(news) == 1:
+                matched[ni] = prior_cards[olds[0]].get("id")
+                used_old.add(olds[0])
+                used_new.add(ni)
+        rem_old[:] = [i for i in rem_old if i not in used_old]
+        rem_new[:] = [i for i in rem_new if i not in used_new]
+
+    if prior_cards:
+        run_pass(lambda c: (c.get("frontContent", ""), c.get("backContent", "")))
+        run_pass(lambda c: c.get("frontContent", ""))
+
+    for ni, card in enumerate(new_cards):
+        reused = matched.get(ni)
+        card["id"] = reused if reused else str(uuid.uuid4())
+    return new_cards
+
+
 def build_pack(deck_dir: Path) -> dict:
     deck_json_path = deck_dir / "deck.json"
     if not deck_json_path.is_file():
@@ -591,7 +653,10 @@ def build_pack(deck_dir: Path) -> dict:
         if not back and not back_secs:
             errors.append(f"{where}: card back is empty (no text, no sections)")
         card_out = {
-            "id": str(uuid.uuid4()),
+            # Assigned after the loop by assign_stable_ids(): reused from the
+            # previous build when the card is unchanged, so a re-upload keeps
+            # the user's study progress.
+            "id": None,
             "position": i,
             "frontContent": front,
             "backContent": back,
@@ -610,6 +675,12 @@ def build_pack(deck_dir: Path) -> dict:
 
     if errors:
         fail("deck.json validation failed:\n  - " + "\n  - ".join(errors))
+
+    # Reuse card ids from the previous build for unchanged cards (and cards
+    # whose front is unchanged) so a re-upload preserves the user's study
+    # progress — the app keys progress by card id and prunes orphans on pull.
+    # New / changed-front cards get a fresh uuid.
+    assign_stable_ids(cards_out, _read_prior_cards(deck_dir))
 
     manifest = {
         "schemaVersion": 1,

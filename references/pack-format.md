@@ -73,7 +73,7 @@ pack.zip
 
 Rules:
 
-- `id` is always a UUID v4; `position` starts at 0 and increments by array order.
+- `id` is a UUID v4. **On re-upload of the same deck, `upload_pack.py` matches each card against the previous build (`build/pack.zip`) by content and reuses the existing id for unchanged cards** (including back-only edits, e.g. adding an example) — only new cards or cards whose front text changed get a fresh UUID. This keeps the user's study progress across deck updates (the app keys study progress by card id and prunes orphaned progress on pull). `position` starts at 0 and increments by array order.
 - For `storageKind: local`, `storageRef` must be `media/{sectionId}.{ext}` and the ZIP must
   contain the matching file.
 - `storageKind: external` is for YouTube/Vimeo and similar links; `storageRef` is the full URL.
