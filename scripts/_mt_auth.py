@@ -18,7 +18,10 @@ DEFAULT_API_URL = "https://memory-toast-api.smallseven-87b.workers.dev"
 CONFIG_DIR = Path.home() / ".memory-toast"
 CRED_PATH = CONFIG_DIR / "credentials.json"
 # Cloudflare blocks the default Python-urllib User-Agent (error 1010).
-USER_AGENT = "memory-toast-make-card/1.0"
+# Keep in step with package.json (test_upload_pack.py checks it); the server uses the
+# "memory-toast-make-card/" prefix as the fallback CLI signal and the audit log shows it.
+__version__ = "0.8.1"
+USER_AGENT = f"memory-toast-make-card/{__version__}"
 
 
 def fail(msg: str) -> None:

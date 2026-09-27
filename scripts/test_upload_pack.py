@@ -22,6 +22,15 @@ import _mt_auth as auth
 import upload_pack as up
 
 
+def test_user_agent_carries_the_package_version():
+    """The User-Agent is the server's fallback CLI signal and lands in its audit log —
+    it must name the real version, not a stale constant."""
+    assert auth.USER_AGENT == f"memory-toast-make-card/{auth.__version__}"
+    pkg = Path(__file__).resolve().parent.parent / "package.json"
+    if pkg.exists():  # absent in an installed skill (the installer copies scripts/ only)
+        assert json.loads(pkg.read_text())["version"] == auth.__version__
+
+
 def test_premium_gate_detection():
     # The API answers 402 subscription_required when a CLI token uploads on a
     # non-Premium account; only that exact answer is the Premium gate.

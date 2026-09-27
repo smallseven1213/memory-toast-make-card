@@ -31,7 +31,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-USER_AGENT = "memory-toast-make-card/1.0"
+try:
+    from _mt_auth import USER_AGENT  # same version string as the uploader
+except ImportError:  # run outside the scripts directory
+    USER_AGENT = "memory-toast-make-card/0.8.1"
 GEMINI_API_VERSION = "v1beta"
 CRED_PATH = Path.home() / ".memory-toast" / "credentials.json"
 
