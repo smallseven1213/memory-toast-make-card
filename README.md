@@ -25,8 +25,16 @@ npx memory-toast-make-card install --project
 
 ### Option B — skills.sh
 
-Install from the registry, or copy the folder into `~/.claude/skills/memory-toast-make-card/`
-manually. The skill is the directory containing `SKILL.md`.
+```bash
+npx skills add smallseven1213/memory-toast-make-card
+```
+
+Or copy the folder into `~/.claude/skills/memory-toast-make-card/` manually — the skill is
+the directory containing `SKILL.md`. Codex and other skill-aware assistants: put the same
+folder wherever they read skills from; the scripts are not tied to any assistant.
+
+**Step-by-step guide with prompt examples (6 languages):**
+https://www.memory-toast.com/make-card
 
 ## Prerequisites
 
