@@ -5,8 +5,11 @@ Commands:
   login    Prompt for email + password, exchange them for a refresh token, store it.
   token    Log in by pasting a token copied from the app — for Google/Facebook users
            who have no password (app → Settings → Copy upload token).
-  whoami   Show the logged-in account (prints no secrets).
+  whoami   Show the logged-in account and whether it holds Premium (prints no secrets).
   logout   Delete the stored credentials.
+
+Uploading decks from this CLI needs Memory Toast Premium on the account
+(subscribe in the app: Profile → Premium). Login and `whoami` say whether it does.
 
 Secrets are read interactively (never echoed) and never written to disk; only the
 rotating 7-day refresh token is stored, in ~/.memory-toast/credentials.json
@@ -43,8 +46,22 @@ def cmd_login(args) -> None:
         "refreshToken": res["refreshToken"],
     })
     print(f"Logged in as {stored_email}.")
+    _print_premium(api, res.get("accessToken"))
     print(f"Credentials saved to {auth.CRED_PATH} (chmod 600). "
           "Token stays valid as long as you upload at least once every 7 days.")
+
+
+def _print_premium(api: str, access_token) -> None:
+    if not access_token:
+        return
+    premium, cli_upload = auth.premium_status(api, access_token)
+    if premium is None:
+        return
+    if cli_upload:
+        print("Premium: yes — deck uploads from this CLI are enabled.")
+    else:
+        print("Premium: no — deck uploads from this CLI need Memory Toast Premium "
+              "(app → Profile → Premium).")
 
 
 def cmd_token(args) -> None:
@@ -67,7 +84,9 @@ def cmd_whoami(args) -> None:
         print("Not logged in. Run: python3 scripts/mt_login.py login")
         return
     print(f"Logged in as {creds.get('email', '(unknown)')}")
-    print(f"Server: {creds.get('apiUrl', auth.DEFAULT_API_URL)}")
+    api = creds.get('apiUrl', auth.DEFAULT_API_URL)
+    print(f"Server: {api}")
+    _print_premium(api, auth.get_access_token(api))
 
 
 def cmd_logout(args) -> None:

@@ -39,10 +39,19 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
-from _mt_auth import api_call, fail, get_access_token, resolve_api_url
+from _mt_auth import api_call, fail, get_access_token, resolve_api_url, premium_gate
 
 MAX_ZIP_BYTES = 300 * 1024 * 1024  # server-side limit in validators/sync.ts
 DECK_RECORD = ".memory-toast.json"  # per-deck AI state file (deckId, version, libraryPackId, …)
+
+# Audience / explanation language a pack declares — the language its card backs are
+# written in (who the deck is FOR), NOT what it teaches. Aligned with the site's UI
+# locales (validators/library.ts EXPLANATION_LANGUAGES). Off-list or missing -> "en".
+EXPLANATION_LANGUAGES = ("en", "zh-TW", "zh-Hans", "ja", "es", "vi")
+
+
+def norm_language(value):
+    return value if value in EXPLANATION_LANGUAGES else "en"
 
 ALLOWED_EXTS = {
     "image": {".jpg", ".jpeg", ".png", ".gif", ".webp"},
@@ -686,7 +695,7 @@ def build_pack(deck_dir: Path) -> dict:
         "schemaVersion": 1,
         "deckTitle": title,
         "description": description,
-        "language": deck.get("language", "zh-TW"),
+        "language": norm_language(deck.get("language")),
         "tags": tags,
         "cardCount": len(cards_out),
         "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -714,7 +723,7 @@ def build_pack(deck_dir: Path) -> dict:
         "title": title,
         "description": description,
         "tags": tags,
-        "language": deck.get("language", "zh-TW"),
+        "language": norm_language(deck.get("language")),
         "structure": summarize_structure(cards_out),
     }
 
@@ -773,6 +782,7 @@ def main() -> None:
         if pack["tags"]:
             body["tags"] = pack["tags"]
         status, res = api_call("POST", f"{api}/api/v1/decks", body, token)
+        premium_gate(status, res)
         if status != 201:
             fail(f"create deck failed ({status}): {res}")
         deck_id = res["deck"]["id"]
@@ -787,6 +797,7 @@ def main() -> None:
         "sha256": pack["sha256"],
         "cardCount": pack["card_count"],
     }, token)
+    premium_gate(status, res)
     if status == 409:
         fail(
             f"version conflict: server is at version {res.get('serverVersion')}, "
@@ -808,6 +819,7 @@ def main() -> None:
         "cardCount": pack["card_count"],
         "r2Key": r2_key,
     }, token)
+    premium_gate(status, res)
     if status != 200:
         fail(f"commit failed ({status}): {res}")
 

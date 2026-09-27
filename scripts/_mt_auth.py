@@ -87,10 +87,45 @@ def api_call(method, url, body=None, token=None, raw=None, timeout=300):
             return e.code, {"raw": text}
 
 
+PREMIUM_REQUIRED_MSG = (
+    "this account needs Memory Toast Premium to upload decks from the make-card CLI.\n"
+    "  Subscribe in the app: Profile → Premium (no ads, 1000 tokens a month, CLI uploads),\n"
+    "  then run the command again.")
+
+
+def is_subscription_required(status: int, res) -> bool:
+    """True for the API's 402 `subscription_required` answer (CLI upload gate)."""
+    return status == 402 and isinstance(res, dict) and res.get("error") == "subscription_required"
+
+
+def premium_gate(status: int, res) -> None:
+    """Exit with the friendly Premium message when the API gated the call."""
+    if is_subscription_required(status, res):
+        fail(PREMIUM_REQUIRED_MSG)
+
+
+def premium_status(api: str, access_token: str):
+    """GET /users/me → (premium: bool | None, cli_upload: bool | None).
+
+    None when the server predates entitlements or the call fails — never fatal.
+    """
+    status, res = api_call("GET", f"{api}/api/v1/users/me", token=access_token)
+    if status != 200 or not isinstance(res, dict):
+        return None, None
+    ent = (res.get("user") or {}).get("entitlements")
+    if not isinstance(ent, dict):
+        return None, None
+    return bool(ent.get("premium")), bool(ent.get("cliUpload"))
+
+
 def login(api: str, email: str, password: str) -> dict:
-    """POST /auth/login. Returns the parsed response {user, accessToken, refreshToken}."""
+    """POST /auth/login as the CLI. Returns {user, accessToken, refreshToken}.
+
+    `client: "cli"` marks the tokens as the CLI's: the server gates deck uploads
+    on a Premium subscription for them (the app's own session is never gated).
+    """
     status, res = api_call("POST", f"{api}/api/v1/auth/login",
-                           {"email": email, "password": password})
+                           {"email": email, "password": password, "client": "cli"})
     if status != 200:
         msg = res.get("message") or res.get("error") or res
         fail(f"login failed ({status}): {msg}")

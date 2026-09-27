@@ -18,7 +18,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import _mt_auth as auth
 import upload_pack as up
+
+
+def test_premium_gate_detection():
+    # The API answers 402 subscription_required when a CLI token uploads on a
+    # non-Premium account; only that exact answer is the Premium gate.
+    assert auth.is_subscription_required(402, {"error": "subscription_required", "message": "x"})
+    assert not auth.is_subscription_required(402, {"error": "other"})
+    assert not auth.is_subscription_required(403, {"error": "subscription_required"})
+    assert not auth.is_subscription_required(402, {"raw": "not json"})
+    assert not auth.is_subscription_required(200, {})
+    assert "Premium" in auth.PREMIUM_REQUIRED_MSG
 
 
 def test_has_rich_tags():

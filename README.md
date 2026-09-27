@@ -42,6 +42,10 @@ manually. The skill is the directory containing `SKILL.md`.
    python3 ~/.claude/skills/memory-toast-make-card/scripts/mt_login.py token
    ```
    `mt_login.py whoami` shows the logged-in account; `mt_login.py logout` removes the token.
+
+   **Uploading needs Memory Toast Premium** on the account (in the app: Profile → Premium — no ads,
+   1,000 tokens a month, CLI uploads). Without it the upload stops with a `subscription_required`
+   message; `mt_login.py whoami` shows whether the account holds it.
 3. **(Optional) image generation** — export your own key for the provider you want:
    ```bash
    export OPENAI_API_KEY=sk-...      # OpenAI gpt-image-1
@@ -85,6 +89,10 @@ python3 $S/upload_pack.py my-deck
 # Publish to the public Library, then release new versions later
 python3 $S/library_pack.py publish my-deck --category language --description "..."
 python3 $S/library_pack.py release my-deck --changelog "Added 10 cards"
+
+# Optional: publish a free ≤10-card preview (試讀本) of a published >50-card deck
+python3 $S/library_pack.py preview my-deck            # first 10 cards
+python3 $S/library_pack.py preview my-deck --cards 1,3,7,12
 ```
 
 See [`references/pack-format.md`](references/pack-format.md) for the `deck.json` schema, the
@@ -100,6 +108,9 @@ upload protocol, limits, and version/conflict rules.
 - To **share** a deck, `library_pack.py publish` it to the public Library (categories: language,
   science, history, programming, math, geography, exam, other), then `release` new versions as
   you update it. `status` lists what you've published.
+- To offer a free sample of a paid pack, `library_pack.py preview <deck-dir>` builds a
+  **試讀本 (preview pack)** — a separate, free, ≤10-card deck linked back to the full pack (the
+  full deck must be published and have >50 cards). Re-run it to refresh the preview.
 
 ## Rich text in cards
 

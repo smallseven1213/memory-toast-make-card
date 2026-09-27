@@ -22,6 +22,9 @@ or debugging an upload. **Converse in the user's language** even though these do
 - **Login (Google/Facebook users):** these accounts have no password. In the app, go to
   **Settings → Copy upload token**, then run `python3 scripts/mt_login.py token` and paste it.
 - `mt_login.py whoami` shows who is logged in; `mt_login.py logout` clears it.
+- **Premium required:** uploading / publishing decks from this skill needs Memory Toast
+  Premium on the account (app → Profile → Premium). A `subscription_required` error means the
+  account has no active subscription — tell the user, do not retry or work around it.
 - **Image keys (only if generating images):** the user exports their own
   `OPENAI_API_KEY` or `GEMINI_API_KEY`. You never provide a key.
 
@@ -32,7 +35,10 @@ or debugging an upload. **Converse in the user's language** even though these do
 Ask (in the user's language) only what is missing, one item at a time:
 
 - Topic and scope (e.g. "50 N3 verbs" vs. "this whole PDF").
-- Deck title, description, tags, language (default `zh-TW`).
+- Deck title, description, tags.
+- **Audience language** — which language the card explanations/answers are written in
+  (who the deck is _for_, **not** what it teaches). One of `en` `zh-TW` `zh-Hans` `ja` `es` `vi`;
+  stored as `language` in `deck.json`. Ask the user; default to `en` if unspecified.
 - Data source: user-provided files (PDF/images/notes) or web research.
 - Whether cards should have **generated images** — and if so, the visual style
   (e.g. flat vector icon, watercolor, photoreal) and which provider (OpenAI / Gemini).
@@ -143,8 +149,10 @@ Decks are private until published. To share a deck publicly, use `scripts/librar
 
 ```bash
 # Publish once (category: language|science|history|programming|math|geography|exam|other)
+# --language = audience/explanation language (en|zh-TW|zh-Hans|ja|es|vi, default en);
+# --learning-language = what the deck teaches.
 python3 scripts/library_pack.py publish <deck-dir> \
-  --category language --description "..." --learning-language es
+  --category language --description "..." --language zh-TW --learning-language es
 
 # After updating the deck (upload_pack.py first), push a new public version:
 python3 scripts/library_pack.py release <deck-dir> --changelog "Added digraphs"
@@ -155,7 +163,41 @@ python3 scripts/library_pack.py status          # list your published packs
 `publish` records the `libraryPackId` back into `.memory-toast.json`, so `release` later needs
 no ids. Confirm with the user before publishing — it makes the deck publicly downloadable.
 
-### 8. Report
+### 8. Generate a 試讀本 (preview) — optional
+
+For a large paid pack you can publish a free **試讀本 (preview pack)** — a small sample (default
+**first 10 cards**, hard-capped at 10) that becomes its own deck + its own library pack, linked
+back to the full pack. In the marketplace, the full pack's detail screen shows a「免費試讀」button
+that downloads the preview as an independent deck; once the user owns the full pack the button
+disappears. A preview is **always free** and study/training is automatically separate (it is a
+separate deck).
+
+Preconditions:
+
+- **The full pack must already be published** (`library_pack.py publish` first) — the command
+  reads the full deck's `libraryPackId` from `.memory-toast.json`.
+- **The full deck must have MORE than 50 cards** — otherwise the command errors with
+  `卡包需超過 50 張才能製作試讀本`.
+
+```bash
+# Free preview = first 10 cards of the full deck (run after the full pack is published)
+python3 scripts/library_pack.py preview <full-deck-dir>
+
+# Pick specific cards (1-based indices and/or card ids, comma-separated; max 10)
+python3 scripts/library_pack.py preview <full-deck-dir> --cards 1,3,7,12
+
+# Custom title suffix (default is 試讀本; the preview title = "<full title> — <suffix>")
+python3 scripts/library_pack.py preview <full-deck-dir> --title-suffix "免費試讀"
+```
+
+The command slices the deck into a sibling `<full-deck-dir>-preview/` directory (copying only the
+selected cards' referenced media), uploads it as its own deck, and publishes it as a free library
+pack with `previewOfLibraryPackId` = the full pack's id. It records `previewDeckId` /
+`previewLibraryPackId` into the full deck's `.memory-toast.json` and `previewOfLibraryPackId` into
+the preview's. **Re-running updates the existing preview** (re-slices and releases a new version —
+never a duplicate). Confirm with the user before running — it publishes a public (free) pack.
+
+### 9. Report
 
 Tell the user: deck title, card count, media count, ZIP size, deck id, pack version, and
 remind them to pull the deck in the app (open the deck → top banner "new version available" →

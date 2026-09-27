@@ -12,6 +12,7 @@ Authoritative spec for the `memory-toast-make-card` skill: the ZIP pack structur
 4. [Upload protocol (API)](#4-upload-protocol-api)
 5. [Versioning & conflicts](#5-versioning--conflicts)
 6. [Limits & validation](#6-limits--validation)
+7. [Preview packs (試讀本)](#7-preview-packs-試讀本)
 
 ## 1. ZIP pack structure
 
@@ -118,6 +119,10 @@ my-deck/
 }
 ```
 
+- `language` — the **audience / explanation language** the card backs are written in
+  (who the deck is _for_, **not** what it teaches). One of `en` `zh-TW` `zh-Hans` `ja` `es` `vi`
+  (the app's UI locales); anything off-list or omitted becomes `en`. Set it on publish with
+  `library_pack.py publish --language`, or it carries over from this `deck.json`.
 - Each section must have exactly one of `file` (local → `storageKind: local`) or `url`
   (→ `external`).
 - Extension whitelist — image: jpg/jpeg/png/gif/webp; audio: mp3/m4a/wav/aac/ogg;
@@ -268,3 +273,36 @@ with the local one and offers the pull when the server is newer and no local edi
 | sha256 | 64 lowercase hex; must match the ZIP at commit |
 | expectedSize | must equal the actual R2 object size, or commit returns `size_mismatch` and the object is deleted |
 | signed PUT URL | expires in 10 minutes — upload immediately after sync |
+
+## 7. Preview packs (試讀本)
+
+A **preview pack (試讀本)** is a free sample of a paid pack: it is **its own deck + its own
+`library_packs` row**, linked back to the full pack by a single field. Because it is a separate
+deck, study/training is automatically separate — no extra isolation logic is needed. Previews are
+produced by the `library_pack.py preview` command (see SKILL.md). Rules:
+
+- Default = the full deck's **first 10 cards**; `--cards` (1-based indices and/or card ids,
+  comma-separated) overrides, **hard-capped at 10**.
+- The **full deck must have MORE than 50 cards** to make a preview (skill-side gate; error message
+  `卡包需超過 50 張才能製作試讀本`).
+- A preview is **always free** (`priceTokens = 0`).
+- A full pack may have **one** published preview; a preview **cannot itself have a preview**.
+
+`preview` reuses the existing `upload_pack.py` (to build the preview's own deck) and the
+`library/publish` endpoint, with one extra field on publish:
+
+| Field | Where | Meaning |
+|-------|-------|---------|
+| `previewOfLibraryPackId` | body of `POST /api/v1/library/publish` | When set, this new library pack is the preview of the full pack identified by `previewOfLibraryPackId`. The server verifies: the caller owns the target full pack, the target is not itself a preview (no nesting), the full pack has no published preview yet, the full pack's `cardCount > 50`, this pack's `cardCount <= 10`, and forces `priceTokens = 0`. |
+
+Links written into `.memory-toast.json` (auto-written by `preview`, reused on the next update —
+do not hand-edit the ids):
+
+- The **full deck's record** gains `previewDeckId` and `previewLibraryPackId` (reverse lookup to
+  its preview).
+- The **preview's record** gains `previewOfLibraryPackId` (back-pointer to the full pack), plus its
+  own `deckId` / `libraryPackId` / `version` as usual.
+
+Re-running `preview`: if the preview's record already has a `libraryPackId`, it `release`s a new
+version instead of publishing a duplicate. A new version of the full pack does **not** auto-update
+the preview — re-run `preview` to refresh it.
